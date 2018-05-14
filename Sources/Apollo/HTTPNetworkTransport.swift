@@ -48,11 +48,12 @@ public struct GraphQLHTTPResponseError: Error, LocalizedError {
 }
 
 /// A network transport that uses HTTP POST requests to send GraphQL operations to a server, and that uses `URLSession` as the networking implementation.
-public class HTTPNetworkTransport: NetworkTransport {
+open class HTTPNetworkTransport: NetworkTransport {
   let url: URL
   let session: URLSession
   let serializationFormat = JSONSerializationFormat.self
   let retrier: OperationRetrier?
+  let sendOperationIdentifiers: Bool
   
   /// Creates a network transport with the specified server URL and session configuration.
   ///
@@ -75,7 +76,7 @@ public class HTTPNetworkTransport: NetworkTransport {
   ///   - response: The response received from the server, or `nil` if an error occurred.
   ///   - error: An error that indicates why a request failed, or `nil` if the request was succesful.
   /// - Returns: An object that can be used to cancel an in progress request.
-  public func send<Operation>(operation: Operation, completionHandler: @escaping (_ response: GraphQLResponse<Operation>?, _ error: Error?) -> Void) -> Cancellable {
+  open func send<Operation>(operation: Operation, completionHandler: @escaping (_ response: GraphQLResponse<Operation>?, _ error: Error?) -> Void) -> Cancellable {
     var request = URLRequest(url: url)
     request.httpMethod = "POST"
     
@@ -125,9 +126,7 @@ public class HTTPNetworkTransport: NetworkTransport {
     return task
   }
 
-  private let sendOperationIdentifiers: Bool
-
-  private func requestBody<Operation: GraphQLOperation>(for operation: Operation) -> GraphQLMap {
+  open func requestBody<Operation: GraphQLOperation>(for operation: Operation) -> GraphQLMap {
     if sendOperationIdentifiers {
       guard let operationIdentifier = operation.operationIdentifier else {
         preconditionFailure("To send operation identifiers, Apollo types must be generated with operationIdentifiers")
@@ -137,7 +136,7 @@ public class HTTPNetworkTransport: NetworkTransport {
     return ["query": operation.queryDocument, "variables": operation.variables]
   }
   
-  private func operation<Operation: GraphQLOperation>(
+  open func operation<Operation: GraphQLOperation>(
     _ operation: Operation,
     failedWithError error: Error,
     completionHandler: @escaping (_ response: GraphQLResponse<Operation>?, _ error: Error?) -> Void) {
