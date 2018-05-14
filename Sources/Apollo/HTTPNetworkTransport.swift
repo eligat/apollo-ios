@@ -52,6 +52,7 @@ public class HTTPNetworkTransport: NetworkTransport {
   let url: URL
   let session: URLSession
   let serializationFormat = JSONSerializationFormat.self
+  let retrier: OperationRetrier?
   
   /// Creates a network transport with the specified server URL and session configuration.
   ///
@@ -59,10 +60,11 @@ public class HTTPNetworkTransport: NetworkTransport {
   ///   - url: The URL of a GraphQL server to connect to.
   ///   - configuration: A session configuration used to configure the session. Defaults to `URLSessionConfiguration.default`.
   ///   - sendOperationIdentifiers: Whether to send operation identifiers rather than full operation text, for use with servers that support query persistence. Defaults to false.
-  public init(url: URL, configuration: URLSessionConfiguration = URLSessionConfiguration.default, sendOperationIdentifiers: Bool = false) {
+  public init(url: URL, configuration: URLSessionConfiguration = URLSessionConfiguration.default, retrier: OperationRetrier? = nil, sendOperationIdentifiers: Bool = false) {
     self.url = url
     self.session = URLSession(configuration: configuration)
     self.sendOperationIdentifiers = sendOperationIdentifiers
+    self.retrier = retrier
   }
   
   /// Send a GraphQL operation to a server and return a response.
@@ -82,9 +84,12 @@ public class HTTPNetworkTransport: NetworkTransport {
     let body = requestBody(for: operation)
     request.httpBody = try! serializationFormat.serialize(value: body)
     
-    let task = session.dataTask(with: request) { (data: Data?, response: URLResponse?, error: Error?) in
-      if error != nil {
-        completionHandler(nil, error)
+    let task = session.dataTask(with: request) { [weak self] (data: Data?, response: URLResponse?, error: Error?) in
+      guard let `self` = self
+        else { return }
+      
+      if let error = error {
+        self.operation(operation, failedWithError: error, completionHandler: completionHandler)
         return
       }
       
@@ -93,12 +98,14 @@ public class HTTPNetworkTransport: NetworkTransport {
       }
       
       if (!httpResponse.isSuccessful) {
-        completionHandler(nil, GraphQLHTTPResponseError(body: data, response: httpResponse, kind: .errorResponse))
+        let error = GraphQLHTTPResponseError(body: data, response: httpResponse, kind: .errorResponse)
+        self.operation(operation, failedWithError: error, completionHandler: completionHandler)
         return
       }
       
       guard let data = data else {
-        completionHandler(nil, GraphQLHTTPResponseError(body: nil, response: httpResponse, kind: .invalidResponse))
+        let error = GraphQLHTTPResponseError(body: nil, response: httpResponse, kind: .invalidResponse)
+        self.operation(operation, failedWithError: error, completionHandler: completionHandler)
         return
       }
       
@@ -109,7 +116,7 @@ public class HTTPNetworkTransport: NetworkTransport {
         let response = GraphQLResponse(operation: operation, body: body)
         completionHandler(response, nil)
       } catch {
-        completionHandler(nil, error)
+        self.operation(operation, failedWithError: error, completionHandler: completionHandler)
       }
     }
     
@@ -128,5 +135,24 @@ public class HTTPNetworkTransport: NetworkTransport {
       return ["id": operationIdentifier, "variables": operation.variables]
     }
     return ["query": operation.queryDocument, "variables": operation.variables]
+  }
+  
+  private func operation<Operation: GraphQLOperation>(
+    _ operation: Operation,
+    failedWithError error: Error,
+    completionHandler: @escaping (_ response: GraphQLResponse<Operation>?, _ error: Error?) -> Void) {
+   
+    guard let retrier = retrier else {
+      completionHandler(nil, error)
+      return
+    }
+    
+    retrier.shouldRetry(operation: operation, with: error) { [weak self] (shouldRetry) in
+      if shouldRetry {
+        _ = self?.send(operation: operation, completionHandler: completionHandler)
+      } else {
+        completionHandler(nil, error)
+      }
+    }
   }
 }
