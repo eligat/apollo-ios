@@ -77,13 +77,40 @@ open class HTTPNetworkTransport: NetworkTransport {
   ///   - error: An error that indicates why a request failed, or `nil` if the request was succesful.
   /// - Returns: An object that can be used to cancel an in progress request.
   open func send<Operation>(operation: Operation, completionHandler: @escaping (_ response: GraphQLResponse<Operation>?, _ error: Error?) -> Void) -> Cancellable {
+    
+    let request = self.request(for: operation)
+    let task = dataTask(for: request, operation: operation, completionHandler: completionHandler)
+    task.resume()
+    
+    return task
+  }
+  
+  open func request<Operation: GraphQLOperation>(for operation: Operation) -> URLRequest {
     var request = URLRequest(url: url)
     request.httpMethod = "POST"
     
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
+    
     let body = requestBody(for: operation)
     request.httpBody = try! serializationFormat.serialize(value: body)
+    
+    return request
+  }
+  
+  open func requestBody<Operation: GraphQLOperation>(for operation: Operation) -> GraphQLMap {
+    if sendOperationIdentifiers {
+      guard let operationIdentifier = operation.operationIdentifier else {
+        preconditionFailure("To send operation identifiers, Apollo types must be generated with operationIdentifiers")
+      }
+      return ["id": operationIdentifier, "variables": operation.variables]
+    }
+    return ["query": operation.queryDocument, "variables": operation.variables]
+  }
+  
+  open func dataTask<Operation: GraphQLOperation>(
+    for request: URLRequest,
+    operation: Operation,
+    completionHandler: @escaping (_ response: GraphQLResponse<Operation>?, _ error: Error?) -> Void) -> URLSessionDataTask {
     
     let task = session.dataTask(with: request) { [weak self] (data: Data?, response: URLResponse?, error: Error?) in
       guard let `self` = self
@@ -121,19 +148,7 @@ open class HTTPNetworkTransport: NetworkTransport {
       }
     }
     
-    task.resume()
-    
     return task
-  }
-
-  open func requestBody<Operation: GraphQLOperation>(for operation: Operation) -> GraphQLMap {
-    if sendOperationIdentifiers {
-      guard let operationIdentifier = operation.operationIdentifier else {
-        preconditionFailure("To send operation identifiers, Apollo types must be generated with operationIdentifiers")
-      }
-      return ["id": operationIdentifier, "variables": operation.variables]
-    }
-    return ["query": operation.queryDocument, "variables": operation.variables]
   }
   
   open func operation<Operation: GraphQLOperation>(
