@@ -79,9 +79,14 @@ open class HTTPNetworkTransport: NetworkTransport {
   open func send<Operation>(operation: Operation, completionHandler: @escaping (_ response: GraphQLResponse<Operation>?, _ error: Error?) -> Void) -> Cancellable {
     
     let request = self.request(for: operation)
+    return send(request: request, for: operation, completionHandler: completionHandler)
+  }
+  
+  open func send<Operation>(request: URLRequest,
+                            for operation: Operation,
+                            completionHandler: @escaping (_ response: GraphQLResponse<Operation>?, _ error: Error?) -> Void) -> Cancellable {
     let task = dataTask(for: request, operation: operation, completionHandler: completionHandler)
     task.resume()
-    
     return task
   }
   
@@ -162,9 +167,13 @@ open class HTTPNetworkTransport: NetworkTransport {
       return
     }
     
-    retrier.shouldRetry(operation: operation, request: request, with: error) { [weak self] (shouldRetry) in
+    retrier.shouldRetry(operation: operation, request: request, with: error) { [weak self] (shouldRetry, changedRequest) in
       if shouldRetry {
-        _ = self?.send(operation: operation, completionHandler: completionHandler)
+        if let changedRequest = changedRequest {
+          _ = self?.send(request: changedRequest, for: operation, completionHandler: completionHandler)
+        } else {
+          _ = self?.send(request: request, for: operation, completionHandler: completionHandler)
+        }
       } else {
         completionHandler(nil, error)
       }
