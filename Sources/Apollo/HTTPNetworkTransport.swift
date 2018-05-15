@@ -117,7 +117,7 @@ open class HTTPNetworkTransport: NetworkTransport {
         else { return }
       
       if let error = error {
-        self.operation(operation, failedWithError: error, completionHandler: completionHandler)
+        self.operation(operation, request: request, failedWithError: error, completionHandler: completionHandler)
         return
       }
       
@@ -127,13 +127,13 @@ open class HTTPNetworkTransport: NetworkTransport {
       
       if (!httpResponse.isSuccessful) {
         let error = GraphQLHTTPResponseError(body: data, response: httpResponse, kind: .errorResponse)
-        self.operation(operation, failedWithError: error, completionHandler: completionHandler)
+        self.operation(operation, request: request, failedWithError: error, completionHandler: completionHandler)
         return
       }
       
       guard let data = data else {
         let error = GraphQLHTTPResponseError(body: nil, response: httpResponse, kind: .invalidResponse)
-        self.operation(operation, failedWithError: error, completionHandler: completionHandler)
+        self.operation(operation, request: request, failedWithError: error, completionHandler: completionHandler)
         return
       }
       
@@ -144,7 +144,7 @@ open class HTTPNetworkTransport: NetworkTransport {
         let response = GraphQLResponse(operation: operation, body: body)
         completionHandler(response, nil)
       } catch {
-        self.operation(operation, failedWithError: error, completionHandler: completionHandler)
+        self.operation(operation, request: request, failedWithError: error, completionHandler: completionHandler)
       }
     }
     
@@ -153,6 +153,7 @@ open class HTTPNetworkTransport: NetworkTransport {
   
   open func operation<Operation: GraphQLOperation>(
     _ operation: Operation,
+    request: URLRequest,
     failedWithError error: Error,
     completionHandler: @escaping (_ response: GraphQLResponse<Operation>?, _ error: Error?) -> Void) {
    
@@ -161,7 +162,7 @@ open class HTTPNetworkTransport: NetworkTransport {
       return
     }
     
-    retrier.shouldRetry(operation: operation, with: error) { [weak self] (shouldRetry) in
+    retrier.shouldRetry(operation: operation, request: request, with: error) { [weak self] (shouldRetry) in
       if shouldRetry {
         _ = self?.send(operation: operation, completionHandler: completionHandler)
       } else {
